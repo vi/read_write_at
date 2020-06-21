@@ -1,4 +1,19 @@
-//! TODO
+//! Abstraction of a file- or block derive-like object, data from/to which can be read/written at offsets.
+//! 
+//! There are alreay some analogues of those traits, including in libstd.
+//! But they are either platform-specific or tied to implementation of some algorithm.
+//! 
+//! This crate focuses on abstraction itself, providing mostly wrappers and helper functions.
+//! 
+//! Traits are given in two varieties: with mutable `&mut self` and immutable `&self` methods.
+//! 
+//! libstd's platform-specific FileExt traits are forwarded for std::fs::File.
+//! 
+//! There is a generic wrapper for using `Read+Seek` or `Read+Write+Seek` objects
+//! 
+//! Immutable version of traits are implemented for `RefCell`s or `Mutex`s over mutable versions.
+//! 
+//! TODO: vectored IO
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -64,11 +79,12 @@ pub trait ReadAtMut {
     }
 }
 
-impl<T: ReadAt> ReadAtMut for T{ 
+impl<T: ReadAt+?Sized> ReadAtMut for T{ 
     fn read_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize> {
         ReadAt::read_at(self, buf, offset)
     }
 }
+
 /// TODO
 pub trait WriteAt {
     /// TODO
@@ -126,11 +142,21 @@ pub trait WriteAtMut {
     }
 }
 
-impl<T: WriteAt> WriteAtMut for T{ 
+impl<T: WriteAt+?Sized> WriteAtMut for T{ 
     fn write_at(&mut self, buf: &[u8], offset: u64) -> Result<usize> {
         WriteAt::write_at(self, buf, offset)
     }
 }
+
+
+/// A combined ReadAt and WriteAt for trait objects.
+pub trait ReadWriteAt : ReadAt + WriteAt {}
+impl<T:ReadAt+WriteAt> ReadWriteAt for T {}
+
+/// A combined ReadAtMut and WriteAtMut for trait objects
+pub trait ReadWriteAtMut : ReadAtMut + WriteAtMut {}
+impl<T:ReadAtMut+WriteAtMut> ReadWriteAtMut for T {}
+
 
 // cfg line is copied from https://doc.rust-lang.org/stable/src/std/os/mod.rs.html at 2020-06-22
 #[cfg(any(target_os = "redox", unix, target_os = "vxworks", target_os = "hermit"))]
@@ -219,10 +245,152 @@ impl<T:Write+Seek> WriteAtMut for ReadWriteSeek<T> {
     }
 }
 
+impl<U,T> ReadAt for std::cell::RefCell<U> 
+where T:ReadAtMut+?Sized, U:std::ops::DerefMut<Target=T>
+{
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize> {
+        let mut se = self.borrow_mut();
+        ReadAtMut::read_at(se.deref_mut(), buf, offset)
+    }
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<()> {
+        let mut se = self.borrow_mut();
+        ReadAtMut::read_exact_at(se.deref_mut(), buf, offset)
+    }
+}
+
+impl<U,T> WriteAt for std::cell::RefCell<U> 
+where T:WriteAtMut+?Sized, U:std::ops::DerefMut<Target=T>
+{
+    fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize> {
+        let mut se = self.borrow_mut();
+        WriteAtMut::write_at(se.deref_mut(), buf, offset)
+    }
+    fn write_all_at(&self, buf: &[u8], offset: u64) -> Result<()> {
+        let mut se = self.borrow_mut();
+        WriteAtMut::write_all_at(se.deref_mut(), buf, offset)
+    }
+}
+
+impl<U,T> ReadAt for std::sync::Mutex<U> 
+where T:ReadAtMut+?Sized, U:std::ops::DerefMut<Target=T>
+{
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize> {
+        let se = self.lock();
+        let mut se = match se {
+            Ok(x) => x,
+            Err(_) =>  return Err(Error::new(
+                ErrorKind::Other,
+                "poisoned mutex encountered",
+            )),
+        };
+        ReadAtMut::read_at(se.deref_mut(), buf, offset)
+    }
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<()> {
+        let se = self.lock();
+        let mut se = match se {
+            Ok(x) => x,
+            Err(_) =>  return Err(Error::new(
+                ErrorKind::Other,
+                "poisoned mutex encountered",
+            )),
+        };
+        ReadAtMut::read_exact_at(se.deref_mut(), buf, offset)
+    }
+}
+
+impl<U,T> WriteAt for std::sync::Mutex<U> 
+where T:WriteAtMut+?Sized, U:std::ops::DerefMut<Target=T>
+{
+    fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize> {
+        let se = self.lock();
+        let mut se = match se {
+            Ok(x) => x,
+            Err(_) =>  return Err(Error::new(
+                ErrorKind::Other,
+                "poisoned mutex encountered",
+            )),
+        };
+        WriteAtMut::write_at(se.deref_mut(), buf, offset)
+    }
+    fn write_all_at(&self, buf: &[u8], offset: u64) -> Result<()> {
+        let se = self.lock();
+        let mut se = match se {
+            Ok(x) => x,
+            Err(_) =>  return Err(Error::new(
+                ErrorKind::Other,
+                "poisoned mutex encountered",
+            )),
+        };
+        WriteAtMut::write_all_at(se.deref_mut(), buf, offset)
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    use super::*;
+
+    fn i_want_immut<T:ReadAt+?Sized>(t:&T) {
+        let mut v = vec![0,0,0];
+        t.read_exact_at(&mut v[..], 3).unwrap();
+        assert_eq!(v, vec![7,8,9]);
     }
+    fn i_want_mut<T:ReadAtMut+?Sized>(t:&mut T) {
+        let mut v = vec![0,0];
+        t.read_exact_at(&mut v[..], 2).unwrap();
+        assert_eq!(v, vec![6,7]);
+    }
+    fn i_have_obj() -> Box<dyn ReadAtMut> { 
+        let v = vec![4u8, 5,6,7,8,9,10,11];
+        let o = ReadWriteSeek(std::io::Cursor::new(v));
+        Box::new(o)
+     }
+
+    #[test]
+    fn check_refc_wrapping_works() {
+        let mut o = i_have_obj();
+        i_want_mut(&mut *o);
+        let rc = std::cell::RefCell::new(o);
+        i_want_immut(&rc);
+    }
+
+
+    fn i_have_obj2() -> Box<dyn ReadWriteAtMut + Send> { 
+        let v = vec![4u8, 5,6,7,8,9,10,11];
+        let o = ReadWriteSeek(std::io::Cursor::new(v));
+        Box::new(o)
+    }
+    fn i_want_immut2<T:ReadWriteAt+?Sized>(t:&T) {
+        let mut v = vec![0,0,0];
+        t.read_exact_at(&mut v[..], 0).unwrap();
+        assert_eq!(v, vec![4,5,6]);
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        t.read_exact_at(&mut v[..], 0).unwrap();
+        assert_eq!(v, vec![4,44,44]);
+    }
+    fn i_want_immut3<T:ReadWriteAt+?Sized>(t:&T) {
+        let v = vec![44,44, 44];
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        t.write_all_at(&v[..], 1).unwrap();
+    }
+
+    #[test]
+    fn check_mutex_wrapping_works() {
+        let o = i_have_obj2();
+        let rc = std::sync::Mutex::new(o);
+        let rc = std::sync::Arc::new(rc);
+        let rc2 = rc.clone();
+        
+        let g1 = std::thread::spawn(move|| {
+            i_want_immut2(&*rc)
+        });
+        let g2 = std::thread::spawn(move|| {
+            i_want_immut3(&*rc2)
+        });
+        g1.join().unwrap();
+        g2.join().unwrap();
+    }
+
 }
