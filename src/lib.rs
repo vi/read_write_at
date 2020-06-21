@@ -245,8 +245,9 @@ impl<T:Write+Seek> WriteAtMut for ReadWriteSeek<T> {
     }
 }
 
+
 impl<U,T> ReadAt for std::cell::RefCell<U> 
-where T:ReadAtMut+?Sized, U:std::ops::DerefMut<Target=T>
+where T:ReadAtMut+?Sized, U: std::ops::DerefMut<Target=T>
 {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize> {
         let mut se = self.borrow_mut();
@@ -257,6 +258,24 @@ where T:ReadAtMut+?Sized, U:std::ops::DerefMut<Target=T>
         ReadAtMut::read_exact_at(se.deref_mut(), buf, offset)
     }
 }
+
+
+/*
+impl<T> ReadAt for std::cell::RefCell<T> 
+where T:ReadAtMut+?Sized
+{
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize> {
+        let mut se = self.borrow_mut();
+        ReadAtMut::read_at(&mut *se, buf, offset)
+    }
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<()> {
+        let mut se = self.borrow_mut();
+        ReadAtMut::read_exact_at(&mut *se, buf, offset)
+    }
+}
+*/
+
+
 
 impl<U,T> WriteAt for std::cell::RefCell<U> 
 where T:WriteAtMut+?Sized, U:std::ops::DerefMut<Target=T>
@@ -352,6 +371,12 @@ mod tests {
         i_want_mut(&mut *o);
         let rc = std::cell::RefCell::new(o);
         i_want_immut(&rc);
+
+        let v = vec![4u8, 5,6,7,8,9,10,11];
+        let mut o2 = ReadWriteSeek(std::io::Cursor::new(v));
+        i_want_mut(&mut o2);
+        let rc2 = std::cell::RefCell::new(o2);
+        //i_want_immut(&rc2);
     }
 
 
