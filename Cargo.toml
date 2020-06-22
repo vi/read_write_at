@@ -3,6 +3,12 @@ name = "read_write_at"
 version = "0.1.0"
 authors = ["Vitaly _Vi Shukela <vi0oss@gmail.com>"]
 edition = "2018"
+repository = "https://github.com/vi/read_write_at"
+license = "MIT/Apache-2.0"
+description = "Abstraction over a file or block device that can be read/written with offset."
+keywords = ["read", "write", "seek", "read_at", "write_at"]
+readme = "README.md"
+#msrv = "1.34.2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
