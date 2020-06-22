@@ -3,7 +3,7 @@
 //! There are alreay some analogues of those traits, including in libstd.
 //! But they are either platform-specific or tied to implementation of some algorithm.
 //! 
-//! This crate focuses on abstraction itself, providing mostly wrappers and helper functions.
+//! This crate focuses on the abstraction itself, providing mostly wrappers and helper functions.
 //! 
 //! Traits are given in two varieties: with mutable `&mut self` and immutable `&self` methods.
 //! 
@@ -214,7 +214,21 @@ impl ReadAtMut for std::fs::File {
 
 /// A wrapper that calls `Seek::seek` and `Read::read` or `Write::write` for each call of `read_at` or `write_at`
 /// Can be used for read-only access as well.
-pub struct ReadWriteSeek<T:Seek>(T);
+/// 
+/// Example:
+/// 
+/// ```
+/// use read_write_at::{ReadWriteSeek,ReadAtMut};
+/// 
+/// let v = vec![3u8, 4,5,6];
+/// let c = std::io::Cursor::new(v);
+/// let mut rws = ReadWriteSeek(c);
+/// 
+/// let mut v2 = vec![0,0];
+/// rws.read_exact_at(&mut v2[..], 1).unwrap();
+/// assert_eq!(v2, vec![4,5]);
+/// ```
+pub struct ReadWriteSeek<T:Seek>(pub T);
 
 impl<T:Read+Seek> ReadAtMut for ReadWriteSeek<T> {
     fn read_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize> {
@@ -264,7 +278,24 @@ impl<T:Write+Seek> WriteAtMut for ReadWriteSeek<T> {
 
 
 /// A wrapper struct to allow accessing `RefCell` and `Mutex` helper impls for trait objects.
-pub struct DerefWrapper<T: std::ops::DerefMut> (T);
+///
+/// Example:
+/// 
+/// ```
+/// use read_write_at::{ReadWriteSeek,ReadWriteAtMut,ReadWriteAt,DerefWrapper};
+/// 
+/// let v = vec![3u8, 4,5,6];
+/// let c = std::io::Cursor::new(v);
+/// let rws = ReadWriteSeek(c);
+/// let obj1 : Box<dyn ReadWriteAtMut> = Box::new(rws);
+/// let mtx = std::sync::Mutex::new(DerefWrapper(obj1));
+/// let obj2 : Box<dyn ReadWriteAt> = Box::new(mtx);
+/// 
+/// let mut v2 = vec![0,0];
+/// obj2.read_exact_at(&mut v2[..], 1).unwrap();
+/// assert_eq!(v2, vec![4,5]);
+/// ```
+pub struct DerefWrapper<T: std::ops::DerefMut> (pub T);
 
 impl<T,U> ReadAtMut for DerefWrapper<U>
 where T:ReadAtMut+?Sized, U: std::ops::DerefMut<Target = T>
