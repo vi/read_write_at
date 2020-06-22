@@ -12,7 +12,7 @@
 //! There is a generic wrapper for using `Read+Seek` or `Read+Write+Seek` objects
 //! 
 //! Immutable version of traits are implemented for `RefCell`s or `Mutex`s over mutable versions.
-//! You may need to implement `std::ops::DerefMut` for your types to use them although.
+//! You may need to use `DerefWrapper` it you use trait ojects although.
 //! 
 //! TODO: vectored IO
 
@@ -21,12 +21,13 @@
 
 use std::io::{Read,Write,Seek,SeekFrom,Result,Error,ErrorKind};
 
-/// Generalisation of [`std::os::unix::fs::FileExt`](https://doc.rust-lang.org/stable/std/os/unix/fs/trait.FileExt.html)
+/// Read-only generalisation of [`std::os::unix::fs::FileExt`](https://doc.rust-lang.org/stable/std/os/unix/fs/trait.FileExt.html)
 pub trait ReadAt {
     /// Reads a number of bytes starting from a given offset.
     /// Returns the number of bytes read.
-    /// The offset is relative to the start of the file and thus independent from the current cursor.
-    /// If type thta implements trait has concept of a cursor then it should not be affected by this function.
+    /// The offset is relative to the start of the (virtual) file and thus independent
+    /// from the current cursor, if the object has concept of a cursor.
+    /// That cursor then should not be affected by this function.
     /// Short reads are not considered as errors.
     fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize>;
 
@@ -52,9 +53,12 @@ pub trait ReadAt {
         }
     }
 }
-/// Generalisation of 
+/// Similar to `ReadAt`, but functions may allow to change object state,
+/// including cursor moves if the object has concept of a cursor
+/// 
+/// Note that `ReadAtMut` implementations from `RefCell` and `Mutex` do not check for cursor moves.
 pub trait ReadAtMut {
-    /// TODO
+    /// Similar to `ReadAt::read_at`, but it is allowed to change object internal state.
     fn read_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize>;
 
     /// Similar to `read_at`, but without short reads.
@@ -84,15 +88,19 @@ impl<T: ReadAt+?Sized> ReadAtMut for T{
     fn read_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize> {
         ReadAt::read_at(self, buf, offset)
     }
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> Result<()> {
+        ReadAt::read_exact_at(self, buf, offset)
+    }
 }
 
-/// TODO
+/// Write counterpart of `ReadAt`.
 pub trait WriteAt {
-    /// TODO
+    /// Writes data contained in buffer `buf` at offset `offset`. May actually write less bytes than you request.
+    /// Obviously, it is expected to change information referenced by this object despite of accepting `&self`,
+    /// but properties of the writer itself (such as current position, if one exist) should not be changed.
     fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize>;
 
-    /// Similar to `write_at`, but without short writes. if entirety of the provided buffer cannot be written,
-    /// an error is returned.
+    /// Similar to `write_at`, but without short writes.
     // Implementation is copied from `https://doc.rust-lang.org/stable/src/std/sys/unix/ext/fs.rs.html` in 2020-06-22.
     fn write_all_at(&self, mut buf: &[u8], mut offset: u64) -> Result<()> {
         while !buf.is_empty() {
@@ -114,9 +122,17 @@ pub trait WriteAt {
         Ok(())
     }
 }
-/// TODO
+/// Similar to `WriteAt`, but functions may allow to change object state,
+/// including cursor moves if the object has concept of a cursor.
+/// 
+/// Note that `WriteAtMut` implementations from `RefCell` and `Mutex` do not check for cursor moves.
 pub trait WriteAtMut {
-    /// TODO
+    /// Writes a number of bytes starting from a given offset.
+    /// Returns the number of bytes written.
+    /// The offset is relative to the start of the (virtual) file and thus independent
+    /// from the current cursor, if the object has concept of a cursor.
+    /// That cursor then should not be affected by this function.
+    /// Short writes are not considered as errors.
     fn write_at(&mut self, buf: &[u8], offset: u64) -> Result<usize>;
 
     /// Similar to `write_at`, but without short writes. if entirety of the provided buffer cannot be written,
@@ -243,18 +259,6 @@ impl<T:Write+Seek> WriteAtMut for ReadWriteSeek<T> {
             ));
         }
         Write::write_all(&mut self.0, buf)
-    }
-}
-
-impl<T:Seek> std::ops::Deref for ReadWriteSeek<T> {
-    type Target = Self;
-    fn deref(&self) -> &Self {
-        self
-    }
-}
-impl<T:Seek> std::ops::DerefMut for ReadWriteSeek<T> {
-    fn deref_mut(&mut self) -> &mut Self {
-        self
     }
 }
 
