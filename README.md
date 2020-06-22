@@ -16,4 +16,11 @@ There is a generic wrapper for using `Read+Seek` or `Read+Write+Seek` objects
 Immutable version of traits are implemented for `RefCell`s or `Mutex`s over mutable versions.
 You may need to use `DerefWrapper` it you use trait ojects although.
 
-TODO: vectored IO
+TODO:
+
+* vectored IO
+* async?
+* reading to uninitialized buffers?
+* `bytes` crate intergration?
+
+License: MIT/Apache-2.0

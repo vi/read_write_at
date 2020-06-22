@@ -14,7 +14,12 @@
 //! Immutable version of traits are implemented for `RefCell`s or `Mutex`s over mutable versions.
 //! You may need to use `DerefWrapper` it you use trait ojects although.
 //! 
-//! TODO: vectored IO
+//! TODO:
+//! 
+//! * vectored IO
+//! * async?
+//! * reading to uninitialized buffers?
+//! * `bytes` crate intergration?
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
