@@ -12,6 +12,7 @@
 //! There is a generic wrapper for using `Read+Seek` or `Read+Write+Seek` objects
 //! 
 //! Immutable version of traits are implemented for `RefCell`s or `Mutex`s over mutable versions.
+//! You may need to implement `std::ops::DerefMut` for your types to use them although.
 //! 
 //! TODO: vectored IO
 
@@ -245,22 +246,46 @@ impl<T:Write+Seek> WriteAtMut for ReadWriteSeek<T> {
     }
 }
 
-
-impl<U,T> ReadAt for std::cell::RefCell<U> 
-where T:ReadAtMut+?Sized, U: std::ops::DerefMut<Target=T>
-{
-    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize> {
-        let mut se = self.borrow_mut();
-        ReadAtMut::read_at(se.deref_mut(), buf, offset)
+impl<T:Seek> std::ops::Deref for ReadWriteSeek<T> {
+    type Target = Self;
+    fn deref(&self) -> &Self {
+        self
     }
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<()> {
-        let mut se = self.borrow_mut();
-        ReadAtMut::read_exact_at(se.deref_mut(), buf, offset)
+}
+impl<T:Seek> std::ops::DerefMut for ReadWriteSeek<T> {
+    fn deref_mut(&mut self) -> &mut Self {
+        self
     }
 }
 
 
-/*
+/// A wrapper struct to allow accessing `RefCell` and `Mutex` helper impls for trait objects.
+pub struct DerefWrapper<T: std::ops::DerefMut> (T);
+
+impl<T,U> ReadAtMut for DerefWrapper<U>
+where T:ReadAtMut+?Sized, U: std::ops::DerefMut<Target = T>
+{
+    fn read_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize> {
+        ReadAtMut::read_at(std::ops::DerefMut::deref_mut(&mut self.0), buf, offset)
+    }
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> Result<()> {
+        ReadAtMut::read_exact_at(std::ops::DerefMut::deref_mut(&mut self.0), buf, offset)
+    }
+}
+
+impl<T,U> WriteAtMut for DerefWrapper<U>
+where T:WriteAtMut+?Sized, U: std::ops::DerefMut<Target = T>
+{
+    fn write_at(&mut self, buf: &[u8], offset: u64) -> Result<usize> {
+        WriteAtMut::write_at(std::ops::DerefMut::deref_mut (&mut self.0), buf, offset)
+    }
+    fn write_all_at(&mut self, buf: &[u8], offset: u64) -> Result<()> {
+        WriteAtMut::write_all_at(std::ops::DerefMut::deref_mut(&mut self.0), buf, offset)
+    }
+}
+
+
+
 impl<T> ReadAt for std::cell::RefCell<T> 
 where T:ReadAtMut+?Sized
 {
@@ -273,25 +298,24 @@ where T:ReadAtMut+?Sized
         ReadAtMut::read_exact_at(&mut *se, buf, offset)
     }
 }
-*/
 
-
-
-impl<U,T> WriteAt for std::cell::RefCell<U> 
-where T:WriteAtMut+?Sized, U:std::ops::DerefMut<Target=T>
+impl<T> WriteAt for std::cell::RefCell<T> 
+where T:WriteAtMut+?Sized
 {
     fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize> {
         let mut se = self.borrow_mut();
-        WriteAtMut::write_at(se.deref_mut(), buf, offset)
+        WriteAtMut::write_at(&mut *se, buf, offset)
     }
     fn write_all_at(&self, buf: &[u8], offset: u64) -> Result<()> {
         let mut se = self.borrow_mut();
-        WriteAtMut::write_all_at(se.deref_mut(), buf, offset)
+        WriteAtMut::write_all_at(&mut *se, buf, offset)
     }
 }
 
-impl<U,T> ReadAt for std::sync::Mutex<U> 
-where T:ReadAtMut+?Sized, U:std::ops::DerefMut<Target=T>
+
+
+impl<T> ReadAt for std::sync::Mutex<T> 
+where T:ReadAtMut+?Sized
 {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<usize> {
         let se = self.lock();
@@ -302,7 +326,7 @@ where T:ReadAtMut+?Sized, U:std::ops::DerefMut<Target=T>
                 "poisoned mutex encountered",
             )),
         };
-        ReadAtMut::read_at(se.deref_mut(), buf, offset)
+        ReadAtMut::read_at(&mut *se, buf, offset)
     }
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<()> {
         let se = self.lock();
@@ -313,12 +337,12 @@ where T:ReadAtMut+?Sized, U:std::ops::DerefMut<Target=T>
                 "poisoned mutex encountered",
             )),
         };
-        ReadAtMut::read_exact_at(se.deref_mut(), buf, offset)
+        ReadAtMut::read_exact_at(&mut *se, buf, offset)
     }
 }
 
-impl<U,T> WriteAt for std::sync::Mutex<U> 
-where T:WriteAtMut+?Sized, U:std::ops::DerefMut<Target=T>
+impl<T> WriteAt for std::sync::Mutex<T> 
+where T:WriteAtMut+?Sized
 {
     fn write_at(&self, buf: &[u8], offset: u64) -> Result<usize> {
         let se = self.lock();
@@ -329,7 +353,7 @@ where T:WriteAtMut+?Sized, U:std::ops::DerefMut<Target=T>
                 "poisoned mutex encountered",
             )),
         };
-        WriteAtMut::write_at(se.deref_mut(), buf, offset)
+        WriteAtMut::write_at(&mut *se, buf, offset)
     }
     fn write_all_at(&self, buf: &[u8], offset: u64) -> Result<()> {
         let se = self.lock();
@@ -340,10 +364,12 @@ where T:WriteAtMut+?Sized, U:std::ops::DerefMut<Target=T>
                 "poisoned mutex encountered",
             )),
         };
-        WriteAtMut::write_all_at(se.deref_mut(), buf, offset)
+        WriteAtMut::write_all_at(&mut *se, buf, offset)
     }
 }
 
+
+//pub struct DerefWrapper
 
 #[cfg(test)]
 mod tests {
@@ -369,14 +395,14 @@ mod tests {
     fn check_refc_wrapping_works() {
         let mut o = i_have_obj();
         i_want_mut(&mut *o);
-        let rc = std::cell::RefCell::new(o);
+        let rc = std::cell::RefCell::new(DerefWrapper(o));
         i_want_immut(&rc);
 
         let v = vec![4u8, 5,6,7,8,9,10,11];
         let mut o2 = ReadWriteSeek(std::io::Cursor::new(v));
         i_want_mut(&mut o2);
         let rc2 = std::cell::RefCell::new(o2);
-        //i_want_immut(&rc2);
+        i_want_immut(&rc2);
     }
 
 
@@ -404,7 +430,7 @@ mod tests {
     #[test]
     fn check_mutex_wrapping_works() {
         let o = i_have_obj2();
-        let rc = std::sync::Mutex::new(o);
+        let rc = std::sync::Mutex::new(DerefWrapper(o));
         let rc = std::sync::Arc::new(rc);
         let rc2 = rc.clone();
         
@@ -418,4 +444,13 @@ mod tests {
         g2.join().unwrap();
     }
 
+    #[allow(unused)]
+    #[cfg(unix)]
+    fn check_refc_wrapping_works2() {
+      
+        let f : std::fs::File = unimplemented!();
+        i_want_mut(&mut f);
+        let rc2 = std::cell::RefCell::new(f);
+        i_want_immut(&rc2);
+    }
 }
