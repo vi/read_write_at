@@ -414,6 +414,13 @@ where T:WriteAtMut+?Sized
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::{channel, Sender, Receiver};
+    type S = Sender<()>;
+    type R = Receiver<()>;
+
+    fn ch() -> (S,R) {
+        channel()
+    }
 
     fn i_want_immut<T:ReadAt+?Sized>(t:&T) {
         let mut v = vec![0,0,0];
@@ -451,19 +458,19 @@ mod tests {
         let o = ReadWriteSeek(std::io::Cursor::new(v));
         Box::new(o)
     }
-    fn i_want_immut2<T:ReadWriteAt+?Sized>(t:&T) {
+    fn i_want_immut2<T:ReadWriteAt+?Sized>(t:&T, r:R, s:S) {
         let mut v = vec![0,0,0];
         t.read_exact_at(&mut v[..], 0).unwrap();
         assert_eq!(v, vec![4,5,6]);
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        s.send(()).unwrap();
+        r.recv().unwrap();
 
         t.read_exact_at(&mut v[..], 0).unwrap();
         assert_eq!(v, vec![4,44,44]);
     }
     fn i_want_immut3<T:ReadWriteAt+?Sized>(t:&T) {
         let v = vec![44,44, 44];
-        std::thread::sleep(std::time::Duration::from_millis(50));
         t.write_all_at(&v[..], 1).unwrap();
     }
 
@@ -473,12 +480,17 @@ mod tests {
         let rc = std::sync::Mutex::new(DerefWrapper(o));
         let rc = std::sync::Arc::new(rc);
         let rc2 = rc.clone();
+
+        let (s1,r1) = ch();
+        let (s2,r2) = ch();
         
         let g1 = std::thread::spawn(move|| {
-            i_want_immut2(&*rc)
+            i_want_immut2(&*rc, r1,s2)
         });
         let g2 = std::thread::spawn(move|| {
-            i_want_immut3(&*rc2)
+            r2.recv().unwrap();
+            i_want_immut3(&*rc2);
+            s1.send(()).unwrap();
         });
         g1.join().unwrap();
         g2.join().unwrap();
