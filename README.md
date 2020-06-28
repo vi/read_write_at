@@ -18,6 +18,7 @@ You may need to use `DerefWrapper` it you use trait ojects although.
 
 TODO:
 
+* `parking_lot` integration?
 * vectored IO
 * async?
 * reading to uninitialized buffers?
